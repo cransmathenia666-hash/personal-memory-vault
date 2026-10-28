@@ -1,0 +1,4 @@
+interface:
+  display_name: "个人记忆库管家"
+  short_description: "建立并维护个人信息库，让 Agent 根据真实状态、偏好和反馈提供帮助"
+  default_prompt: "使用 $personal-memory-vault，帮我建立或改进个人信息库，让 Agent 更了解我的需求。"
