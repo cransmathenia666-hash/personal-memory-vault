@@ -77,6 +77,18 @@ Codex 用户解压到自己的 `$CODEX_HOME/skills`；未设置 `CODEX_HOME` 时
 
 详细规则见 [个性化选读](references/reading-curation.md)。安装技能和普通建库均不会自动创建选读任务。
 
+## 开发与验证
+
+在开发目录修改技能文件。开发目录与已安装的技能目录互不自动同步；需要使用更新版时，先核对目标目录，再按实际环境安装完整技能文件夹。
+
+在本机的开发目录中运行：
+
+```powershell
+py -3.10 -B -m unittest discover -s tests -v
+```
+
+其他环境可使用本机可用的 Python 3 命令。
+
 ## 包含内容
 
 `SKILL.md` 是 Agent 的工作入口；`references/` 包含建库模型、维护与反馈、可选选读、效果验收和设计依据；`agents/openai.yaml` 提供 Codex 界面元数据。

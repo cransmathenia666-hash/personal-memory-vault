@@ -1,0 +1,6 @@
+# 本地开发交接文件（含本机路径），不进公开仓库
+AGENTS.md
+
+# Python
+__pycache__/
+*.pyc

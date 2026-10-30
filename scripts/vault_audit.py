@@ -8,7 +8,7 @@ basenames, orphan formal pages, stale inbox items, updated-date distribution.
 Usage:
     python vault_audit.py "/path/to/vault"
     python vault_audit.py <vault> --root-alias 个人信息库 --inbox-age 30
-    python vault_audit.py <vault> --skip .obsidian,.trash,_recovery-evidence --json > audit.json
+    python vault_audit.py <vault> --skip .obsidian,.trash,_recovery-evidence
 
 Conventions assumed (override with flags): top dirs starting 1/2/3 are formal
 knowledge, top dirs starting 0 are inbox; pages carry YAML frontmatter.
@@ -39,6 +39,31 @@ def frontmatter(text):
     return text[3:end] if end > 0 else None
 
 
+def plain_headings(text):
+    headings = set()
+    has_formatted_heading = False
+    fence = None
+    for line in text.splitlines():
+        marker = re.match(r"^ {0,3}(`{3,}|~{3,})", line)
+        if marker:
+            value = marker.group(1)
+            if fence is None:
+                fence = value
+            elif value[0] == fence[0] and len(value) >= len(fence):
+                fence = None
+            continue
+        if fence is not None:
+            continue
+        match = re.match(r"^ {0,3}#{1,6}[ \t]+(.+?)[ \t]*#*[ \t]*$", line)
+        if match:
+            heading = match.group(1).strip()
+            if re.search(r"[*_`\[\]<>]", heading):
+                has_formatted_heading = True
+            else:
+                headings.add(heading.casefold())
+    return headings, has_formatted_heading
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("vault")
@@ -52,6 +77,8 @@ def main():
     args = ap.parse_args()
 
     vault = os.path.abspath(args.vault)
+    if not os.path.isdir(vault):
+        ap.error("vault directory does not exist: " + vault)
     skip = {s for s in args.skip.split(",") if s}
     req = [r for r in args.req.split(",") if r]
     prefixes = tuple(p for p in args.formal_prefixes.split(",") if p)
@@ -66,34 +93,59 @@ def main():
         return os.path.relpath(path, vault).replace(os.sep, "/")
 
     by_rel = {rel(p): p for p in files}
+    by_path = {r[:-3]: r for r in by_rel}
     by_base = collections.defaultdict(list)
     for p in files:
         by_base[os.path.basename(p)[:-3]].append(rel(p))
 
     broken = collections.defaultdict(list)
+    ambiguous = collections.defaultdict(list)
+    unverified = collections.defaultdict(list)
     inbound = collections.Counter()
+    heading_cache = {}
     links = 0
     for p in files:
         source = rel(p)
         for m in LINK.finditer(read(p)):
-            target = m.group(1).split("|")[0].split("#")[0].strip()
-            if not target:
+            reference = m.group(1).split("|", 1)[0].strip()
+            target, separator, anchor = reference.partition("#")
+            target, anchor = target.strip(), anchor.strip()
+            if not target and not anchor:
                 continue
             links += 1
             if target.lower().endswith(".md"):
                 target = target[:-3]
             if alias and (target == alias or target.startswith(alias + "/")):
                 target = target[len(alias) + 1:]
-            base = target.split("/")[-1]
-            if target in by_rel:
-                if target != source:
-                    inbound[target] += 1
-            elif base in by_base:
-                for cand in by_base[base]:
-                    if cand != source:
-                        inbound[cand] += 1
+            if not target:
+                candidates = [source]
+            elif target in by_path:
+                candidates = [by_path[target]]
+            elif "/" not in target:
+                candidates = by_base.get(target, [])
             else:
-                broken[target].append(source)
+                candidates = []
+            if not candidates:
+                broken[reference].append(source)
+                continue
+            for candidate in candidates:
+                if candidate != source:
+                    inbound[candidate] += 1
+            if len(candidates) > 1:
+                ambiguous[reference].append(source)
+            elif separator:
+                if not anchor or anchor.startswith("^") or "#" in anchor:
+                    unverified[reference].append(source)
+                    continue
+                candidate = candidates[0]
+                if candidate not in heading_cache:
+                    heading_cache[candidate] = plain_headings(read(by_rel[candidate]))
+                headings, formatted = heading_cache[candidate]
+                if anchor.casefold() not in headings:
+                    if formatted:
+                        unverified[reference].append(source)
+                    else:
+                        broken[reference].append(source)
 
     missing_fields = {}
     no_fm = []
@@ -143,9 +195,15 @@ def main():
         "broken_link_occurrences": sum(len(v) for v in broken.values()),
         "broken_by_target": {k: {"count": len(v), "sources": v[:6]}
                              for k, v in sorted(broken.items(), key=lambda kv: -len(kv[1]))},
+        "ambiguous_links": {k: {"count": len(v), "sources": v[:6]}
+                            for k, v in sorted(ambiguous.items())},
+        "unverified_anchors": {k: {"count": len(v), "sources": v[:6]}
+                               for k, v in sorted(unverified.items())},
         "pages_without_frontmatter": no_fm,
         "pages_missing_fields": missing_fields,
         "duplicate_basenames": dup,
+        "formal_prefixes_used": list(prefixes),
+        "formal_pages_checked": len(formal),
         "orphan_formal_pages": orphans,
         "inbox": inbox,
         "stale_inbox": stale,
